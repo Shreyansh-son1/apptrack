@@ -26,6 +26,23 @@ npm start            # production: one process serves API + client
 Data goes into `apptrack.db` (SQLite) in the project root. Override with
 `DATABASE_FILE`. There is no auth: it is a single-user tool.
 
+## Docker
+
+```bash
+docker compose up --build        # app on http://localhost:3001
+```
+
+A two-stage `Dockerfile`: the build stage installs everything, runs the strict
+typecheck and builds the React bundle; the runtime stage installs production
+dependencies only, copies in the built client and the server source, and runs as
+the non-root `node` user. The SQLite file lives at `/data/apptrack.db` on a named
+volume, so data survives `docker compose down` and rebuilds. A `HEALTHCHECK`
+polls `/api/health`.
+
+Two things I would change for a real deployment: run the server from compiled
+JavaScript instead of `tsx`, and move off SQLite if there were more than one
+instance (see below).
+
 ## Layout
 
 ```

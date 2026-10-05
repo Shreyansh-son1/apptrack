@@ -1,0 +1,11 @@
+services:
+  apptrack:
+    build: .
+    ports:
+      - "3001:3001"
+    volumes:
+      - apptrack-data:/data
+    restart: unless-stopped
+
+volumes:
+  apptrack-data:
