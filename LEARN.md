@@ -114,5 +114,14 @@ Do not put this on the CV until all of these have an answer:
 13. What breaks first at 100,000 records?
 14. What would you change if a second person started using it?
 
+15. Why does `update()` re-parse the merged record when the patch schema
+    already validated the patch?
+16. What does `responseRate` return when nothing has been sent, and why?
+17. Why is the export route registered before `/:id`?
+18. What is CSV formula injection, and how do export and import cancel each
+    other out?
+19. What does the rate limiter protect against, and what does it not?
+20. What does the CI workflow check that running the tests locally does not?
+
 If a question has no answer yet, that part of the code is not mine yet. Go
 back and work through it until it is.

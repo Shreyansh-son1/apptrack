@@ -1,11 +1,26 @@
 # apptrack
 
+![CI](https://github.com/Shreyansh-son1/apptrack/actions/workflows/ci.yml/badge.svg)
+
 A job application tracker built to learn TypeScript properly: React on the
 front, Express and SQLite on the back, and one set of schemas shared by both.
 
 I built it because I was running a high-volume job search and losing track of
 which applications needed a follow-up. The interesting part is not the CRUD,
 it is where the types live and what they are asked to do.
+
+## What it does
+
+- Track applications with company, role, source, dates, link and notes
+- A status pipeline (saved, applied, screening, interview, offer, rejected,
+  withdrawn) where only legal moves are allowed; the server answers `409` to
+  an illegal one
+- Edit any field of an application, with the same validation as creating one
+- Follow-up dates, with a "needs a follow-up" view for anything due
+- Search, status filters and a summary strip (tracked, sent, interviewing,
+  offers, response rate)
+- CSV import with per-row validation, and CSV export that imports back
+  without loss
 
 ## Running it
 
@@ -18,7 +33,7 @@ Other commands:
 
 ```bash
 npm run typecheck    # tsc --noEmit, strict
-npm test             # 42 tests, vitest
+npm test             # 64 tests, vitest
 npm run build        # builds the client into dist/
 npm start            # production: one process serves API + client
 ```
@@ -80,7 +95,8 @@ the static type from the same schema so there is one definition, not two.
 It also expresses rules the type system cannot. This one is a cross-field
 rule, so it lives in `superRefine` rather than in a type:
 
-> once a record's status is past `saved`, an applied date is required
+> once an application has been sent (any status except `saved` and
+> `withdrawn`), an applied date is required
 
 **3. Rows are parsed, not cast.**
 
@@ -107,6 +123,48 @@ is the other failure mode, and it is almost as annoying.
 The parser is hand-written rather than a dependency, because handling quoted
 fields and escaped quotes was the part I wanted to understand.
 
+## Editing, the summary strip and export
+
+**Editing re-validates the merged record.** `PATCH` accepts any subset of
+fields, and the patch schema is the input schema made partial. Making a schema
+partial drops its cross-field rules, so on its own an edit could clear the
+applied date of a sent application. `repository.update` therefore merges the
+patch into the stored record and runs the result through the full input schema.
+The edit form sends only the fields that changed, and one `ApplicationForm`
+component serves both "add" and "edit" so the two cannot drift apart.
+
+**The response rate is arithmetic in shared code.** `responseRate` and
+`applicationsSent` live in `src/shared` and have their own tests. A rejection
+counts as a reply; `saved` and `withdrawn` are left out of "sent" because the
+data does not say whether they ever went out. It returns `null` instead of
+`NaN` when nothing has been sent. It is a response rate, not a success rate: a
+company that never answers stays at "applied", the same as one that has not
+answered yet.
+
+**Export is the exact inverse of import.** `GET /api/applications/export`
+writes the same columns the importer reads, quoting commas, quotes and
+newlines. Any cell that starts with `=`, `+`, `-` or `@` gets a leading
+apostrophe so a spreadsheet will not run it as a formula, and the importer
+strips exactly one apostrophe back off. A test exports records with awkward
+notes, imports them into an empty database and checks they match. The route is
+registered before `/api/applications/:id`, otherwise Express would read
+"export" as an id.
+
+## Hardening and CI
+
+- `helmet` sets the standard security headers. Its default
+  `upgrade-insecure-requests` directive is switched off, because over plain
+  `http://localhost` it makes the browser try to load the app's own assets over
+  https.
+- `express-rate-limit` caps each client at 240 requests a minute on `/api`
+  (answers `429`). Behind a reverse proxy, set `TRUST_PROXY=1` so the limiter
+  sees the real client address.
+- Request bodies are size-limited, input is validated at the boundary, and
+  every query is parameterised.
+- GitHub Actions (`.github/workflows/ci.yml`) runs typecheck, tests and the
+  client build on every push and pull request, then builds the Docker image
+  and checks that the container answers `/api/health`.
+
 ## API
 
 | Method | Path | Notes |
@@ -114,9 +172,10 @@ fields and escaped quotes was the part I wanted to understand.
 | GET | `/api/applications` | `?status=` `?q=` `?dueOnly=true` |
 | POST | `/api/applications` | 201, or 400 with per-field errors |
 | GET | `/api/applications/:id` | |
-| PATCH | `/api/applications/:id` | 409 on an illegal status change |
+| PATCH | `/api/applications/:id` | any subset of fields; 409 on an illegal status change, 400 if the result would break a cross-field rule |
 | DELETE | `/api/applications/:id` | 204 |
 | POST | `/api/applications/import` | `text/csv` body |
+| GET | `/api/applications/export` | downloads `applications.csv` |
 | GET | `/api/stats` | counts by status, follow-ups due |
 
 Every failure returns the same shape, so the client handles one thing:
@@ -142,6 +201,9 @@ size. It is still the wrong place for it.
 **No optimistic concurrency.** Two tabs editing the same record will have
 last-write-wins. The `updatedAt` field is there and would be the obvious thing
 to check against.
+
+**No accounts.** There is no login, so it is a single-user tool. Sharing it
+would need authentication (sessions or JWT), per-user rows and Postgres.
 
 **The status flow is my flow.** It assumes screening comes before interview
 and that an offer is terminal. Someone else's pipeline would not match.
