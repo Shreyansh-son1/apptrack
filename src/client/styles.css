@@ -386,3 +386,73 @@ a {
   padding-left: calc(var(--space) * 2);
   color: var(--signal);
 }
+
+/* ---------- stats strip, edit, export ---------- */
+
+.stats-strip {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--space);
+  margin: 0 0 calc(var(--space) * 2);
+}
+
+@media (max-width: 720px) {
+  .stats-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.stat {
+  padding: var(--space) calc(var(--space) * 1.5);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.stat dt {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.stat dd {
+  margin: 2px 0 0;
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.row-edit {
+  padding: 5px var(--space);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.row-edit:hover {
+  border-color: var(--line);
+  color: var(--ink);
+}
+
+.row-editing {
+  list-style: none;
+}
+
+.form-actions {
+  display: flex;
+  gap: var(--space);
+}
+
+.secondary {
+  padding: 8px calc(var(--space) * 2);
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.export-row {
+  margin: 0;
+  font-size: 13px;
+}

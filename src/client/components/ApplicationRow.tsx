@@ -10,6 +10,7 @@ interface Props {
   application: Application;
   today: string;
   onStatusChange: (id: string, status: Status) => void;
+  onEdit: (id: string) => void;
   onDelete: (id: string) => void;
 }
 
@@ -28,6 +29,7 @@ export function ApplicationRow({
   application,
   today,
   onStatusChange,
+  onEdit,
   onDelete,
 }: Props): JSX.Element {
   const due = isFollowUpDue(application, today);
@@ -84,6 +86,16 @@ export function ApplicationRow({
             </option>
           ))}
         </select>
+        <button
+          type="button"
+          className="row-edit"
+          aria-label={`Edit ${application.company}`}
+          onClick={() => {
+            onEdit(application.id);
+          }}
+        >
+          Edit
+        </button>
         <button
           type="button"
           className="row-delete"

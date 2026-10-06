@@ -5,12 +5,14 @@ import {
   todayIso,
   type Application,
   type ApplicationInput,
+  type ApplicationPatch,
   type Stats,
   type Status,
 } from '../shared/index';
 import { api, ApiError } from './api';
 import { ApplicationRow } from './components/ApplicationRow';
-import { NewApplicationForm } from './components/NewApplicationForm';
+import { ApplicationForm } from './components/ApplicationForm';
+import { StatsStrip } from './components/StatsStrip';
 import { ImportPanel } from './components/ImportPanel';
 
 /**
@@ -31,6 +33,7 @@ export function App(): JSX.Element {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [message, setMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   const today = useMemo(() => todayIso(), []);
 
@@ -74,10 +77,36 @@ export function App(): JSX.Element {
     }
   }
 
+  /**
+   * Sends only the fields that actually changed, so an edit cannot
+   * overwrite something another change touched in the meantime, and the
+   * server's illegal-transition check only fires if status really moved.
+   */
+  async function saveEdit(original: Application, input: ApplicationInput): Promise<void> {
+    const patch: Record<string, unknown> = {};
+    for (const key of Object.keys(input) as Array<keyof ApplicationInput>) {
+      if (input[key] !== original[key]) patch[key] = input[key];
+    }
+    if (Object.keys(patch).length === 0) {
+      setEditingId(null);
+      return;
+    }
+
+    try {
+      await api.update(original.id, patch as ApplicationPatch);
+      setFieldErrors({});
+      setMessage(null);
+      setEditingId(null);
+      await refresh();
+    } catch (error: unknown) {
+      handleFailure(error);
+    }
+  }
+
   async function changeStatus(id: string, status: Status): Promise<void> {
     const current = applications.find((a) => a.id === id);
     const patch =
-      status !== 'saved' && current?.appliedOn === null
+      status !== 'saved' && status !== 'withdrawn' && current?.appliedOn === null
         ? { status, appliedOn: today }
         : { status };
 
@@ -124,6 +153,8 @@ export function App(): JSX.Element {
           {message}
         </p>
       )}
+
+      {stats !== null && <StatsStrip stats={stats} />}
 
       <div className="layout">
         <nav className="rail" aria-label="Filters">
@@ -188,28 +219,54 @@ export function App(): JSX.Element {
             </p>
           ) : (
             <ul className="rows">
-              {applications.map((application) => (
-                <ApplicationRow
-                  key={application.id}
-                  application={application}
-                  today={today}
-                  onStatusChange={(id, status) => {
-                    void changeStatus(id, status);
-                  }}
-                  onDelete={(id) => {
-                    void remove(id);
-                  }}
-                />
-              ))}
+              {applications.map((application) =>
+                application.id === editingId ? (
+                  <li key={application.id} className="row-editing">
+                    <ApplicationForm
+                      initial={application}
+                      fieldErrors={fieldErrors}
+                      onSubmit={(input) => {
+                        void saveEdit(application, input);
+                      }}
+                      onCancel={() => {
+                        setEditingId(null);
+                        setFieldErrors({});
+                      }}
+                    />
+                  </li>
+                ) : (
+                  <ApplicationRow
+                    key={application.id}
+                    application={application}
+                    today={today}
+                    onStatusChange={(id, status) => {
+                      void changeStatus(id, status);
+                    }}
+                    onEdit={(id) => {
+                      setFieldErrors({});
+                      setEditingId(id);
+                    }}
+                    onDelete={(id) => {
+                      void remove(id);
+                    }}
+                  />
+                ),
+              )}
             </ul>
           )}
 
-          <NewApplicationForm
-            fieldErrors={fieldErrors}
+          <ApplicationForm
+            fieldErrors={editingId === null ? fieldErrors : {}}
             onSubmit={(input) => {
               void create(input);
             }}
           />
+
+          <p className="export-row">
+            <a href="/api/applications/export" download="applications.csv">
+              Export all applications as CSV
+            </a>
+          </p>
 
           <ImportPanel
             onImport={async (text) => {

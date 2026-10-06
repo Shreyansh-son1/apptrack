@@ -1,16 +1,27 @@
 import { useState } from 'react';
 import {
+  ALLOWED_TRANSITIONS,
   SOURCES,
   STATUSES,
   describeStatus,
+  type Application,
   type ApplicationInput,
   type Source,
   type Status,
 } from '../../shared/index';
 
+/**
+ * One form for both jobs. With no `initial` it adds a record; with one it
+ * edits that record. Keeping a single component means the fields, the
+ * labels and the error display cannot drift between "add" and "edit".
+ */
 interface Props {
   fieldErrors: Record<string, string[]>;
   onSubmit: (input: ApplicationInput) => void;
+  /** Present when editing an existing application. */
+  initial?: Application;
+  /** Present when editing; lets the person back out without saving. */
+  onCancel?: () => void;
 }
 
 /**
@@ -30,16 +41,31 @@ interface FormState {
   notes: string;
 }
 
-const EMPTY: FormState = {
-  company: '',
-  role: '',
-  source: 'linkedin',
-  status: 'applied',
-  appliedOn: new Date().toISOString().slice(0, 10),
-  followUpOn: '',
-  url: '',
-  notes: '',
-};
+function emptyState(): FormState {
+  return {
+    company: '',
+    role: '',
+    source: 'linkedin',
+    status: 'applied',
+    appliedOn: new Date().toISOString().slice(0, 10),
+    followUpOn: '',
+    url: '',
+    notes: '',
+  };
+}
+
+function stateFrom(application: Application): FormState {
+  return {
+    company: application.company,
+    role: application.role,
+    source: application.source,
+    status: application.status,
+    appliedOn: application.appliedOn ?? '',
+    followUpOn: application.followUpOn ?? '',
+    url: application.url ?? '',
+    notes: application.notes,
+  };
+}
 
 const SOURCE_LABELS: Record<Source, string> = {
   linkedin: 'LinkedIn',
@@ -49,8 +75,26 @@ const SOURCE_LABELS: Record<Source, string> = {
   other: 'Other',
 };
 
-export function NewApplicationForm({ fieldErrors, onSubmit }: Props): JSX.Element {
-  const [form, setForm] = useState<FormState>(EMPTY);
+export function ApplicationForm({
+  fieldErrors,
+  onSubmit,
+  initial,
+  onCancel,
+}: Props): JSX.Element {
+  const editing = initial !== undefined;
+  const [form, setForm] = useState<FormState>(
+    initial === undefined ? emptyState() : stateFrom(initial),
+  );
+
+  /*
+   * When editing, the status menu offers only moves the server would
+   * accept, the same rule the row's dropdown uses. When adding, any
+   * starting status is fine.
+   */
+  const statusOptions: readonly Status[] =
+    initial === undefined
+      ? STATUSES
+      : [initial.status, ...ALLOWED_TRANSITIONS[initial.status]];
 
   function set<K extends keyof FormState>(key: K, value: FormState[K]): void {
     setForm((previous) => ({ ...previous, [key]: value }));
@@ -67,7 +111,7 @@ export function NewApplicationForm({ fieldErrors, onSubmit }: Props): JSX.Elemen
       url: form.url === '' ? null : form.url,
       notes: form.notes,
     });
-    setForm(EMPTY);
+    if (!editing) setForm(emptyState());
   }
 
   function errorFor(field: keyof FormState): string | null {
@@ -76,7 +120,9 @@ export function NewApplicationForm({ fieldErrors, onSubmit }: Props): JSX.Elemen
 
   return (
     <section className="panel">
-      <h2 className="panel-title">Add an application</h2>
+      <h2 className="panel-title">
+        {editing ? `Edit ${initial.company}` : 'Add an application'}
+      </h2>
 
       <div className="field-grid">
         <label className="field">
@@ -129,7 +175,7 @@ export function NewApplicationForm({ fieldErrors, onSubmit }: Props): JSX.Elemen
               set('status', event.target.value as Status);
             }}
           >
-            {STATUSES.map((status) => (
+            {statusOptions.map((status) => (
               <option key={status} value={status}>
                 {describeStatus(status)}
               </option>
@@ -189,9 +235,16 @@ export function NewApplicationForm({ fieldErrors, onSubmit }: Props): JSX.Elemen
         </label>
       </div>
 
-      <button type="button" className="primary" onClick={submit}>
-        Save application
-      </button>
+      <div className="form-actions">
+        <button type="button" className="primary" onClick={submit}>
+          {editing ? 'Save changes' : 'Save application'}
+        </button>
+        {onCancel !== undefined && (
+          <button type="button" className="secondary" onClick={onCancel}>
+            Cancel
+          </button>
+        )}
+      </div>
     </section>
   );
 }
