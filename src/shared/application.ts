@@ -149,16 +149,18 @@ export const applicationInputSchema = z
   })
   .superRefine((value, ctx) => {
     /*
-     * A cross-field rule the type system cannot express: once a record
-     * has left 'saved', an application date is required. This is the
+     * A cross-field rule the type system cannot express: once an
+     * application has been sent, an applied date is required. 'withdrawn'
+     * is exempt, because a saved posting can be dropped without ever
+     * having been applied to. This is the
      * clearest example in the project of why Zod earns its place
      * alongside TypeScript rather than duplicating it.
      */
-    if (value.status !== 'saved' && value.appliedOn === null) {
+    if (value.status !== 'saved' && value.status !== 'withdrawn' && value.appliedOn === null) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['appliedOn'],
-        message: "An applied date is required once the status is past 'saved'",
+        message: 'An applied date is required once the application has been sent',
       });
     }
     if (
@@ -265,4 +267,39 @@ export function isFollowUpDue(
 
 export function todayIso(now: Date = new Date()): string {
   return now.toISOString().slice(0, 10);
+}
+
+/* ------------------------------------------------------------------ *
+ * Pipeline numbers
+ * ------------------------------------------------------------------ */
+
+/**
+ * Applications that actually went out. 'withdrawn' is left out on
+ * purpose: the data does not say whether the person withdrew before or
+ * after sending, so counting it either way would be a guess.
+ */
+export function applicationsSent(counts: StatusCounts): number {
+  return (
+    counts.applied +
+    counts.screening +
+    counts.interview +
+    counts.offer +
+    counts.rejected
+  );
+}
+
+/**
+ * Share of sent applications that got any reply, a rejection included
+ * (a rejection is still an answer). Returns null when nothing has been
+ * sent yet, so the UI shows a dash instead of dividing by zero.
+ *
+ * Caveat worth knowing: a company that never replies stays at 'applied',
+ * so silence and "still waiting" look the same. This is a response rate,
+ * not a success rate.
+ */
+export function responseRate(counts: StatusCounts): number | null {
+  const sent = applicationsSent(counts);
+  if (sent === 0) return null;
+  const replied = sent - counts.applied;
+  return replied / sent;
 }

@@ -1,5 +1,6 @@
 import {
   applicationInputSchema,
+  type Application,
   type ImportResult,
 } from '../shared/index';
 import { fieldErrors } from './errors';
@@ -12,7 +13,10 @@ import type { ApplicationRepository } from './repository';
  * point of the import is that one bad row must not stop the good ones
  * or reach the database half-formed.
  */
-export function parseCsv(text: string): string[][] {
+export function parseCsv(input: string): string[][] {
+  // Excel's "CSV UTF-8" puts a byte order mark at the start, which would
+  // otherwise glue itself to the first header name.
+  const text = input.charCodeAt(0) === 0xfeff ? input.slice(1) : input;
   const rows: string[][] = [];
   let row: string[] = [];
   let field = '';
@@ -57,6 +61,71 @@ export function parseCsv(text: string): string[][] {
 
   return rows.filter((r) => r.some((cell) => cell.trim() !== ''));
 }
+
+/* ------------------------------------------------------------------ *
+ * Export
+ * ------------------------------------------------------------------ */
+
+/** Column order of the export. Every name is one the importer accepts. */
+export const EXPORT_COLUMNS = [
+  'company',
+  'role',
+  'source',
+  'status',
+  'appliedOn',
+  'followUpOn',
+  'url',
+  'notes',
+] as const;
+
+/**
+ * Spreadsheet apps run a cell as a formula if it starts with one of
+ * these. Notes can be pasted from anywhere, so an exported cell like
+ * `=HYPERLINK(...)` would execute when the file is opened. Prefixing an
+ * apostrophe makes the cell plain text.
+ */
+const FORMULA_LIKE = /^'*[=+\-@]/;
+const GUARDED = /^'+[=+\-@]/;
+
+export function escapeCell(value: string): string {
+  /*
+   * Anything that is formula-like, or already looks like a guarded cell
+   * (apostrophes then a formula character), gets one more apostrophe.
+   * The importer strips exactly one, so the two are exact inverses.
+   */
+  const safe = FORMULA_LIKE.test(value) ? `'${value}` : value;
+  return /[",\r\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
+}
+
+/** The importer undoes the guard above, so export then import is lossless. */
+function unguardCell(value: string): string {
+  return GUARDED.test(value) ? value.slice(1) : value;
+}
+
+export function toCsv(applications: readonly Application[]): string {
+  const lines = [EXPORT_COLUMNS.join(',')];
+  for (const application of applications) {
+    lines.push(
+      [
+        application.company,
+        application.role,
+        application.source,
+        application.status,
+        application.appliedOn ?? '',
+        application.followUpOn ?? '',
+        application.url ?? '',
+        application.notes,
+      ]
+        .map(escapeCell)
+        .join(','),
+    );
+  }
+  return `${lines.join('\n')}\n`;
+}
+
+/* ------------------------------------------------------------------ *
+ * Import
+ * ------------------------------------------------------------------ */
 
 const HEADER_ALIASES: Record<string, string> = {
   company: 'company',
@@ -115,7 +184,7 @@ export function importCsv(
 
     headers.forEach((header, index) => {
       if (header === null) return;
-      raw[header] = (cells[index] ?? '').trim();
+      raw[header] = unguardCell((cells[index] ?? '').trim());
     });
 
     // Let schema defaults apply rather than sending empty strings through.

@@ -172,3 +172,133 @@ describe('GET /api/stats', () => {
     expect(stats.byStatus.offer).toBe(0);
   });
 });
+
+describe('editing an application (PATCH with several fields)', () => {
+  it('changes several fields at once and leaves the rest alone', async () => {
+    const created = await createOne({ notes: 'first note', source: 'naukri' });
+    const response = await request(app)
+      .patch(`/api/applications/${created.id}`)
+      .send({ company: 'Flexiple Labs', role: 'Backend Developer', notes: 'edited' });
+
+    expect(response.status).toBe(200);
+    const updated = response.body as Application;
+    expect(updated.company).toBe('Flexiple Labs');
+    expect(updated.role).toBe('Backend Developer');
+    expect(updated.notes).toBe('edited');
+    expect(updated.source).toBe('naukri');
+    expect(updated.createdAt).toBe(created.createdAt);
+  });
+
+  it('rejects a bad url with per-field errors', async () => {
+    const created = await createOne();
+    const response = await request(app)
+      .patch(`/api/applications/${created.id}`)
+      .send({ url: 'not-a-url' });
+    expect(response.status).toBe(400);
+    expect(response.body.error.fields).toHaveProperty('url');
+  });
+
+  it('will not let an edit clear the applied date of a sent application', async () => {
+    const created = await createOne({ status: 'applied', appliedOn: '2026-09-18' });
+    const response = await request(app)
+      .patch(`/api/applications/${created.id}`)
+      .send({ appliedOn: '' });
+    expect(response.status).toBe(400);
+    expect(response.body.error.fields).toHaveProperty('appliedOn');
+  });
+
+  it('will not let an edit put the follow-up before the applied date', async () => {
+    const created = await createOne({ status: 'applied', appliedOn: '2026-09-18' });
+    const response = await request(app)
+      .patch(`/api/applications/${created.id}`)
+      .send({ followUpOn: '2026-09-01' });
+    expect(response.status).toBe(400);
+    expect(response.body.error.fields).toHaveProperty('followUpOn');
+  });
+
+  it('lets a saved posting be withdrawn without an applied date', async () => {
+    const created = await createOne();
+    const response = await request(app)
+      .patch(`/api/applications/${created.id}`)
+      .send({ status: 'withdrawn' });
+    expect(response.status).toBe(200);
+  });
+});
+
+describe('GET /api/applications/export', () => {
+  it('is not mistaken for an id, and downloads as a CSV file', async () => {
+    await createOne();
+    const response = await request(app).get('/api/applications/export');
+    expect(response.status).toBe(200);
+    expect(response.headers['content-type']).toContain('text/csv');
+    expect(response.headers['content-disposition']).toContain('applications.csv');
+    expect(response.text.split('\n')[0]).toBe(
+      'company,role,source,status,appliedOn,followUpOn,url,notes',
+    );
+  });
+
+  it('round-trips: export, import into an empty database, get the same records', async () => {
+    await createOne({
+      company: 'Acme, Inc.',
+      role: 'Dev "Lead"',
+      source: 'referral',
+      status: 'applied',
+      appliedOn: '2026-09-18',
+      followUpOn: '2026-09-25',
+      url: 'https://example.com/jobs/1',
+      notes: 'multi\nline, with "quotes"',
+    });
+    await createOne({ company: 'Formula', role: 'Tester', notes: '=HYPERLINK("http://x")' });
+    await createOne({ company: 'Dash', role: 'Tester', notes: '- started with a dash' });
+    await createOne({ company: 'Quote', role: 'Tester', notes: "'=already quoted" });
+
+    const exported = await request(app).get('/api/applications/export');
+    const originals = (await request(app).get('/api/applications')).body as Application[];
+
+    const fresh = createApp(openDatabase(':memory:'));
+    const imported = await request(fresh)
+      .post('/api/applications/import')
+      .set('Content-Type', 'text/csv')
+      .send(exported.text);
+    expect((imported.body as ImportResult).imported).toBe(4);
+    expect((imported.body as ImportResult).skipped).toBe(0);
+
+    const copies = (await request(fresh).get('/api/applications')).body as Application[];
+    const strip = (a: Application) => ({
+      company: a.company,
+      role: a.role,
+      source: a.source,
+      status: a.status,
+      appliedOn: a.appliedOn,
+      followUpOn: a.followUpOn,
+      url: a.url,
+      notes: a.notes,
+    });
+    const byCompany = (a: Application, b: Application) => a.company.localeCompare(b.company);
+    expect([...copies].sort(byCompany).map(strip)).toEqual(
+      [...originals].sort(byCompany).map(strip),
+    );
+  });
+});
+
+describe('hardening', () => {
+  it('sends standard security headers', async () => {
+    const response = await request(app).get('/api/health');
+    expect(response.headers['x-content-type-options']).toBe('nosniff');
+    expect(response.headers['content-security-policy']).toBeDefined();
+    expect(response.headers['content-security-policy']).not.toContain(
+      'upgrade-insecure-requests',
+    );
+    expect(response.headers['x-powered-by']).toBeUndefined();
+  });
+
+  it('answers 429 once a client exceeds the rate limit', async () => {
+    const limited = createApp(openDatabase(':memory:'), { rateLimitPerMinute: 3 });
+    for (let i = 0; i < 3; i += 1) {
+      expect((await request(limited).get('/api/health')).status).toBe(200);
+    }
+    const blocked = await request(limited).get('/api/health');
+    expect(blocked.status).toBe(429);
+    expect(blocked.body.error.message).toContain('Too many requests');
+  });
+});

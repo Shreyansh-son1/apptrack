@@ -13,6 +13,12 @@ const dbFile = process.env.DATABASE_FILE ?? path.join(projectRoot, 'apptrack.db'
 const db = openDatabase(dbFile);
 const app = createApp(db);
 
+// Behind a reverse proxy (Render, Fly, nginx) the client IP arrives in
+// X-Forwarded-For; set TRUST_PROXY=1 so the rate limiter sees the real one.
+if (process.env.TRUST_PROXY !== undefined) {
+  app.set('trust proxy', Number(process.env.TRUST_PROXY));
+}
+
 // In production the API also serves the built React bundle, so the whole
 // thing deploys as one service.
 if (process.env.NODE_ENV === 'production') {

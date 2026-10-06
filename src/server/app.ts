@@ -4,6 +4,8 @@ import express, {
   type Response,
 } from 'express';
 import type Database from 'better-sqlite3';
+import helmet from 'helmet';
+import { rateLimit } from 'express-rate-limit';
 import {
   applicationInputSchema,
   applicationPatchSchema,
@@ -14,7 +16,7 @@ import {
 } from '../shared/index';
 import { errorHandler, NotFoundError } from './errors';
 import { ApplicationRepository } from './repository';
-import { importCsv } from './csv';
+import { importCsv, toCsv } from './csv';
 
 /**
  * Wraps an async handler so a rejected promise reaches the error
@@ -29,9 +31,44 @@ function asyncRoute<Req extends Request, Res extends Response>(
   };
 }
 
-export function createApp(db: Database.Database): ExpressApp {
+export interface AppOptions {
+  /** Requests per minute per client on /api. Tests lower this to prove it works. */
+  rateLimitPerMinute?: number;
+}
+
+export function createApp(
+  db: Database.Database,
+  { rateLimitPerMinute = 240 }: AppOptions = {},
+): ExpressApp {
   const app = express();
   const repo = new ApplicationRepository(db);
+
+  /*
+   * Standard security headers. Helmet's default Content-Security-Policy
+   * also sends `upgrade-insecure-requests`, which makes browsers try to
+   * load this app's own assets over https. Over plain http://localhost
+   * that breaks the page, so that one directive is switched off.
+   */
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: { 'upgrade-insecure-requests': null },
+      },
+    }),
+  );
+
+  // A single-user tool, but it can be exposed. A cap per client keeps a
+  // runaway script (or a stranger) from hammering the database.
+  app.use(
+    '/api',
+    rateLimit({
+      windowMs: 60_000,
+      limit: rateLimitPerMinute,
+      standardHeaders: 'draft-7',
+      legacyHeaders: false,
+      message: { error: { message: 'Too many requests, slow down' } },
+    }),
+  );
 
   app.use(express.json({ limit: '1mb' }));
   app.use(express.text({ type: 'text/csv', limit: '2mb' }));
@@ -47,6 +84,21 @@ export function createApp(db: Database.Database): ExpressApp {
       // other untrusted input rather than read field by field.
       const query = listQuerySchema.parse(req.query);
       res.json(repo.list(query));
+    }),
+  );
+
+  /*
+   * Registered BEFORE /api/applications/:id. Express matches routes in
+   * order, so if this came after, "export" would be read as an id and
+   * the request would 404.
+   */
+  app.get(
+    '/api/applications/export',
+    asyncRoute((_req, res) => {
+      res
+        .type('text/csv')
+        .attachment('applications.csv')
+        .send(toCsv(repo.list()));
     }),
   );
 

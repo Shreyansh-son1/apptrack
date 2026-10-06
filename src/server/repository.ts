@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import {
+  applicationInputSchema,
   applicationSchema,
   canTransition,
   isFollowUpDue,
@@ -146,9 +147,18 @@ export class ApplicationRepository {
       throw new TransitionError(current.status, patch.status);
     }
 
+    /*
+     * The patch schema is the input schema made partial, and making a
+     * schema partial drops its cross-field rules. So the merged record
+     * goes back through the full input schema: that is what stops an
+     * edit from clearing the applied date on a sent application, or
+     * moving the follow-up date before it.
+     */
+    const merged = applicationInputSchema.parse({ ...current, ...patch });
+
     const next: Application = {
       ...current,
-      ...patch,
+      ...merged,
       updatedAt: new Date().toISOString(),
     };
 
