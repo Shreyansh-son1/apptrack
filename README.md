@@ -120,6 +120,11 @@ malformed records reached a store undetected because validation ran on the
 batch rather than the row. Rejecting an entire file because line 40 has a typo
 is the other failure mode, and it is almost as annoying.
 
+The good rows are inserted in one database transaction (`createMany`), so an
+unexpected failure part-way leaves the table exactly as it was, instead of
+half-imported. A test forces a failure on the second insert and checks nothing
+was kept.
+
 The parser is hand-written rather than a dependency, because handling quoted
 fields and escaped quotes was the part I wanted to understand.
 

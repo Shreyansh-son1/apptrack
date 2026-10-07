@@ -206,9 +206,8 @@ export function importCsv(
     }
   }
 
-  for (const input of valid) {
-    repo.create(input);
-  }
+  // One transaction: if any insert fails, none of the good rows are kept.
+  repo.createMany(valid);
 
   return { imported: valid.length, skipped: errors.length, errors };
 }

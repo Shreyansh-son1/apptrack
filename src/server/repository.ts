@@ -140,6 +140,19 @@ export class ApplicationRepository {
     return record;
   }
 
+  /**
+   * Inserts every record or none of them. better-sqlite3's `transaction`
+   * wraps the function in BEGIN/COMMIT and rolls back if it throws, so a
+   * failure on row 40 leaves the table exactly as it was before row 1.
+   * It also makes a large import much faster: one commit, not one per row.
+   */
+  createMany(inputs: readonly ApplicationInput[]): Application[] {
+    const insertAll = this.db.transaction((rows: readonly ApplicationInput[]) =>
+      rows.map((row) => this.create(row)),
+    );
+    return insertAll(inputs);
+  }
+
   update(id: string, patch: ApplicationPatch): Application {
     const current = this.get(id);
 

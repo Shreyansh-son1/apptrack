@@ -2,7 +2,13 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../src/server/app';
 import { openDatabase } from '../src/server/db';
-import type { Application, ImportResult, Stats } from '../src/shared/index';
+import { ApplicationRepository } from '../src/server/repository';
+import type {
+  Application,
+  ApplicationInput,
+  ImportResult,
+  Stats,
+} from '../src/shared/index';
 
 let app: ReturnType<typeof createApp>;
 
@@ -300,5 +306,45 @@ describe('hardening', () => {
     const blocked = await request(limited).get('/api/health');
     expect(blocked.status).toBe(429);
     expect(blocked.body.error.message).toContain('Too many requests');
+  });
+});
+
+describe('createMany is all-or-nothing', () => {
+  it('rolls back every insert when one row fails partway', () => {
+    const db = openDatabase(':memory:');
+    const repo = new ApplicationRepository(db);
+
+    const good: ApplicationInput = {
+      company: 'Flexiple',
+      role: 'Full Stack Developer',
+      source: 'linkedin',
+      status: 'saved',
+      appliedOn: null,
+      followUpOn: null,
+      url: null,
+      notes: '',
+    };
+    // A null source breaks the table's NOT NULL rule, so SQLite throws on
+    // the second insert, after the first has already gone in.
+    const bad = { ...good, company: 'Broken', source: null } as unknown as ApplicationInput;
+
+    expect(() => repo.createMany([good, bad])).toThrow();
+    expect(repo.list()).toHaveLength(0);
+  });
+
+  it('keeps everything when all rows are fine', () => {
+    const repo = new ApplicationRepository(openDatabase(':memory:'));
+    const row: ApplicationInput = {
+      company: 'A',
+      role: 'B',
+      source: 'other',
+      status: 'saved',
+      appliedOn: null,
+      followUpOn: null,
+      url: null,
+      notes: '',
+    };
+    expect(repo.createMany([row, { ...row, company: 'C' }])).toHaveLength(2);
+    expect(repo.list()).toHaveLength(2);
   });
 });
